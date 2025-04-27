@@ -33,11 +33,14 @@ class MDLMConfig:
     mask_token: int = 0
     neg_infinity: float = -1e9
     sigma_max: float = 1e8
-    sampling_steps: int = 500 # number of diffusion steps (during inference)
+    sampling_steps: int = 1000 # number of diffusion steps (during inference)
+    sampling_eps: float = 1e-5
 
+    # --- sampling ----
+    sample_and_print: int = 20
 
 def decode(l, itos) -> str:
-    return ''.join([itos[i] for i in l])    
+    return ''.join([itos[i] for i in l])
 
 
 def _sample_categorical(categorical_probs: Tensor) -> Tensor:
@@ -115,7 +118,8 @@ class MDLM(L.LightningModule):
 
     def compute_loss(self, x0: Tensor) -> Tensor:
         # x0: [batch_size, num_tokens]
-        t = torch.rand((x0.shape[0], 1), device=x0.device) # t ~ U[0, 1]
+        # t = torch.rand((x0.shape[0], 1), device=x0.device) # t ~ U[0, 1]
+        t = self.low_discrepancy_sample_t(x0.shape[0])
         sigma_t, dsigma_t = self.sigma_and_dsigma_t(t)
         alpha_t = torch.exp(-sigma_t)
         alpha_t_bar = -1 * alpha_t * dsigma_t
@@ -134,6 +138,17 @@ class MDLM(L.LightningModule):
         loss = -log_p_theta * weight # [batch_size, seq_len]
         loss = loss.mean()
         return loss
+
+    def low_discrepancy_sample_t(self, n: int) -> Tensor:
+        """Section 3.5.1: Sample time steps from a low-discrepancy sampler
+        based on Variational diffusion models from Kingma et al. 2021
+        """
+        eps_t = torch.rand(n, device=self.device)
+        offset = torch.arange(n, device=self.device) / n
+        t = (eps_t / n + offset) % 1 # modulo 1 to avoid t > 1
+        t = (1 - self.cfg.sampling_eps) * t + self.cfg.sampling_eps
+        t = t[:, None] # [n, 1]
+        return t
 
     def sample(
         self,
@@ -192,8 +207,8 @@ class MDLM(L.LightningModule):
         return optimizer
 
     def on_train_epoch_end(self):
-        if self.current_epoch % 5 == 0:
-            samples = self.sample(num_samples=2, num_steps=500, block_size=64).cpu().numpy()
+        if self.current_epoch % self.cfg.sample_and_print == 0:
+            samples = self.sample(num_samples=2, block_size=64).cpu().numpy()
             for i, sample in enumerate(samples):
                 s = decode(sample, self.itos)
                 print (f'At epoch {self.current_epoch}, sample {i}: {s}')
@@ -214,10 +229,11 @@ if __name__ == "__main__":
     cfg.mask_token = meta['vocab_size']
     cfg.batch_size = 128  # or any small number for testing
     cfg.block_size = 384  # or any value <= the length of your data
-    cfg.hidden_dim = 128
+    cfg.hidden_dim = 256
     cfg.n_heads = 4
     cfg.n_layers = 4
     cfg.train_samples_per_epoch = 10000
+    cfg.sample_and_print = 10
 
     # Create and move model to device
     model = MDLM(cfg, itos=meta['itos'])
