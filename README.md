@@ -11,7 +11,9 @@ uv pip install -r requirements.txt
 
 #### Instructions
 The following models have been implemented:
-- [ ] [MDLM: Simple and Effective Masked Diffusion Language Models (Sahoo et al. 2024)](https://arxiv.org/abs/2406.07524): To run the model, use `python mdlm.py`
+- [x] [MDLM: Simple and Effective Masked Diffusion Language Models (Sahoo et al. 2024)](https://arxiv.org/abs/2406.07524): To run the model, use `python mdlm.py`
+
+TODO:
 - [ ] [SEDD: Discrete Diffusion Modeling by Estimating the Ratios of the Data Distribution (Lou et al. 2024)](https://arxiv.org/abs/2310.16834): To run the model, use `python sedd.py`
 
 #### Notes
