@@ -1,0 +1,10 @@
+torch
+numpy
+transformers
+lightning
+einops
+datasets
+tiktoken
+wandb
+tqdm
+pytest
