@@ -101,7 +101,7 @@ class MDLM(L.LightningModule):
             sigma_t = self.cfg.sigma_max * t
             dsigma_t = self.cfg.sigma_max * torch.ones_like(t)
         elif self.noise_schedule == "log_linear":
-            sigma_t = -torch.log1p(-t)
+            sigma_t = -torch.log(1 - t)
             dsigma_t = 1 / (1 - t)
         else:
             raise NotImplementedError(f"Noise schedule {self.noise_schedule} not implemented")
@@ -110,16 +110,7 @@ class MDLM(L.LightningModule):
 
     def forward(self, x: Tensor, sigma_t: Tensor) -> Tensor:
         # compute the loss
-        logits = self.denoiser_network(x, sigma_t) # [batch_size, seq_len, vocab_size]
-
-        # SUBS parameterization
-        logits[:, :, self.cfg.mask_token] = self.cfg.neg_infinity
-        logits = logits - torch.logsumexp(logits, dim=-1, keepdim=True) # normalize the logits in log space        
-        unmasked_indices = (x != self.cfg.mask_token)
-        logits[unmasked_indices] = self.cfg.neg_infinity # set all the unmasked token logits to -infinity
-        logits[unmasked_indices, x[unmasked_indices]] = 0 # set the true token logit to 0
-
-        return logits
+        return self.denoiser_network(x, sigma_t) # [batch_size, seq_len, vocab_size]
 
     def compute_loss(self, x: Tensor) -> Tensor:
         # x: [batch_size, num_tokens]
@@ -131,18 +122,23 @@ class MDLM(L.LightningModule):
         # mask the tokens with a probability of 1 - alpha_t
         p_mask = torch.repeat_interleave((1 - alpha_t), x.shape[1], dim=1)
         mask = torch.bernoulli(p_mask)
-        xt = torch.where(
-            mask == 1, torch.full_like(x, self.cfg.mask_token), x
-        ) # replace the mask positions with the mask token
+        xt = torch.where(mask == 1, self.cfg.mask_token, x) # replace the mask positions with the mask token
 
         # compute the loss
-        logits = self.forward(x, sigma_t)
-        log_p_theta = torch.gather(logits, dim=-1, index=xt[:, :, None]).squeeze(-1) # [batch_size, seq_len]
+        logits = self.forward(xt, sigma_t)
+        
+        # SUBS parameterization 
+        logits[:, :, self.cfg.mask_token] = self.cfg.neg_infinity
+        logits = logits - torch.logsumexp(logits, dim=-1, keepdim=True) # normalize the logits in log space        
+        unmasked_indices = (xt != self.cfg.mask_token)
+        logits[unmasked_indices] = self.cfg.neg_infinity # set all the unmasked token logits to -infinity
+        logits[unmasked_indices, xt[unmasked_indices]] = 0 # set the true token logit to 0
 
-        weight = alpha_t_bar / (1 - alpha_t) # [batch_size,], difference of -1 from the paper works, TODO: check
-        loss = -log_p_theta * weight[:, None] # [batch_size, seq_len]
+        # get log_p_theta for loss
+        log_p_theta = torch.gather(logits, dim=-1, index=x[:, :, None]).squeeze(-1) # [batch_size, seq_len]
+        weight = -alpha_t_bar / (1 - alpha_t) # [batch_size,], difference of -1 from the paper works, TODO: check
+        loss = -log_p_theta * weight # [batch_size, seq_len]
         loss = loss.mean()
-
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -164,14 +160,15 @@ if __name__ == "__main__":
 
     # Set up config using meta info
     cfg = MDLMConfig()
-    cfg.vocab_size = meta['vocab_size']
+    cfg.vocab_size = meta['vocab_size'] + 1 # +1 for the mask token
     cfg.data_dir = 'data'
     cfg.dataset = 'shakespeare_chat'
-    cfg.batch_size = 128   # or any small number for testing
-    cfg.block_size = 128  # or any value <= the length of your data
-    cfg.hidden_dim = 32
+    cfg.mask_token = meta['vocab_size']
+    cfg.batch_size = 128  # or any small number for testing
+    cfg.block_size = 256  # or any value <= the length of your data
+    cfg.hidden_dim = 128
     cfg.n_heads = 8
-    cfg.n_layers = 5
+    cfg.n_layers = 8
     cfg.train_samples_per_epoch = 10000
 
     # Create and move model to device

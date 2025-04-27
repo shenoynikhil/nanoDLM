@@ -17,6 +17,7 @@ def modulate(x: Tensor, shift: Tensor, scale: Tensor) -> Tensor:
 
 
 def apply_rope(x: Tensor, pos_emb: Tensor) -> Tensor:
+    pos_emb = pos_emb.to(x.device)
     xeven, xodd = x[..., 0::2], x[..., 1::2] # x{even/odd}:[batch_size, seq_len, n_heads, head_dim // 2]
     cos_emb, sin_emb = pos_emb[..., :xeven.shape[-1]], pos_emb[..., xeven.shape[-1]:]
     return torch.cat((
