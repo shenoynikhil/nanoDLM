@@ -4,10 +4,8 @@ import pytest
 import torch
 import pickle
 
-# Add the parent directory to the path so we can import the mdlm module
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from mdlm.main import MDLM, MDLMConfig, get_batch
+from mdlm import MDLM, MDLMConfig, Dataset
 
 # Check if data files exist
 data_dir = os.path.join('data', 'shakespeare_chat')
@@ -43,9 +41,10 @@ def model_and_data():
     model = MDLM(cfg)
     device = torch.device(cfg.device_type)
     model = model.to(device)
+    ds = Dataset('train', cfg)
     
     # Get a batch from the real data
-    x = get_batch('train', cfg)
+    x = ds[0].unsqueeze(0) # add batch
     x = x.to(device)
     
     return model, x
